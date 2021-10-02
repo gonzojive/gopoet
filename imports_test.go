@@ -3,6 +3,8 @@ package gopoet
 import (
 	"reflect"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestImportPackages(t *testing.T) {
@@ -104,6 +106,87 @@ func doRegisterImport(t *testing.T, fn func(imp *Imports, pkgPath, name string) 
 	}
 	if !reflect.DeepEqual(specs, expected) {
 		t.Errorf("unexpected import specs\nExpected:\n%v\nActual:\n%v", expected, specs)
+	}
+}
+
+func TestImportSpecsForFile(t *testing.T) {
+	buildFile := func(fileName, packagePath, packageName string, fn func(f *GoFile)) *GoFile {
+		f := NewGoFile(fileName, packagePath, packageName)
+		fn(f)
+		return f
+	}
+	type ensureImportedExample struct {
+		input, want Symbol
+	}
+	for _, tt := range []struct {
+		name    string
+		f       *GoFile
+		want    []ImportSpec
+		symbols []ensureImportedExample
+	}{
+		{
+			name: "simple",
+			f: buildFile("a.go", "x/y/z", "z", func(f *GoFile) {
+				f.EnsureImported(NewSymbol("x/foo", "Example"))
+			}),
+			want: []ImportSpec{
+				{PackageAlias: "", ImportPath: "x/foo"},
+			},
+		},
+		{
+			name: "collision",
+			f: buildFile("a.go", "x/y/z", "z", func(f *GoFile) {
+				f.EnsureImported(NewSymbol("x/foo", "ExampleX"))
+				f.EnsureImported(NewSymbol("y/foo", "ExampleY"))
+			}),
+			want: []ImportSpec{
+				{PackageAlias: "", ImportPath: "x/foo"},
+				{PackageAlias: "foo1", ImportPath: "y/foo"},
+			},
+			symbols: []ensureImportedExample{
+				{
+					input: NewSymbol("y/foo", "Bar"),
+					want:  Symbol{Package: Package{ImportPath: "x/foo", Name: "fooalias"}, Name: "Bar"},
+				},
+			},
+		},
+		{
+			name: "RegisterImportForPackage respects aliases",
+			f: buildFile("a.go", "x/y/z", "z", func(f *GoFile) {
+				f.RegisterImportForPackage(Package{Name: "fooalias", ImportPath: "x/foo"})
+			}),
+			want: []ImportSpec{
+				{PackageAlias: "fooalias", ImportPath: "x/foo"},
+			},
+		},
+		{
+			name: "RegisterImportForPackage consistent with EnsureImported",
+			f: buildFile("a.go", "x/y/z", "z", func(f *GoFile) {
+				f.RegisterImportForPackage(Package{Name: "fooalias", ImportPath: "x/foo"})
+			}),
+			want: []ImportSpec{
+				{PackageAlias: "fooalias", ImportPath: "x/foo"},
+			},
+			symbols: []ensureImportedExample{
+				{
+					input: NewSymbol("x/foo", "Bar"),
+					want:  Symbol{Package: Package{ImportPath: "x/foo", Name: "fooalias"}, Name: "Bar"},
+				},
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.f.ImportSpecs()
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("unexpected diff in ImportSpecs() of file (-want, +got):\n%s", diff)
+			}
+			for _, ttt := range tt.symbols {
+				got := tt.f.EnsureImported(ttt.want)
+				if diff := cmp.Diff(ttt.want, got); diff != "" {
+					t.Errorf("unexpected diff in EnsureImported(%s) (-want, +got):\n%s", ttt.input, diff)
+				}
+			}
+		})
 	}
 }
 
