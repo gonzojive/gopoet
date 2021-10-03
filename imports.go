@@ -2,6 +2,7 @@ package gopoet
 
 import (
 	"fmt"
+	"path"
 	"reflect"
 	"sort"
 	"strconv"
@@ -14,10 +15,9 @@ import (
 //
 // Imports is not thread-safe.
 type Imports struct {
-	pkgPath           string
-	importsByPath     map[string]importDef
-	pathsByName       map[string]string
-	customConventions ImportConventions
+	pkgPath       string
+	importsByPath map[string]importDef
+	pathsByName   map[string]string
 }
 
 type importDef struct {
@@ -61,17 +61,6 @@ func (i *Imports) RegisterImport(importPath, packageName string) string {
 	return i.prefixForPackage(importPath, packageName, true)
 }
 
-// RegisterNamedImport "imports" the specified package and returns the package
-// prefix to use for symbols in the imported package. It is safe to import the
-// same package repeatedly -- the same prefix will be returned every time. If an
-// attempt is made to import the Imports source package (i.e. importing a
-// package into itself), nothing will be done and an empty prefix will be
-// returned. So such an action is safe and the returned prefix is correct for
-// how symbols in the package should be referenced.
-func (i *Imports) RegisterNamedImport(importPath, packageName string) string {
-	return i.prefixForPackage(importPath, packageName, true)
-}
-
 // PrefixForPackage returns a prefix to use for qualifying symbols from the
 // given package. This method panics if the given package was never registered.
 func (i *Imports) PrefixForPackage(importPath string) string {
@@ -90,30 +79,26 @@ func (i *Imports) prefixForPackage(importPath, packageName string, registerIfNot
 		panic(fmt.Sprintf("Package %q never registered", importPath))
 	}
 
-	// Go spec: "If the PackageName is omitted, it defaults to the identifier
-	// specified in the package clause of the imported package." -
-	// https://golang.org/ref/spec#Import_declarations
-	finalPackageName := packageName
-	assumedPackageName := i.conventions().AssumedPackageName(importPath)
+	p := packageName
 	if packageName == "" {
-		finalPackageName = assumedPackageName
+		p = path.Base(importPath)
 	}
-	pkgBase := finalPackageName
+	pkgBase := p
 	suffix := 1
 	for {
-		if _, ok := i.pathsByName[finalPackageName]; !ok {
+		if _, ok := i.pathsByName[p]; !ok {
 			if i.importsByPath == nil {
 				i.importsByPath = map[string]importDef{}
 				i.pathsByName = map[string]string{}
 			}
-			i.pathsByName[finalPackageName] = importPath
+			i.pathsByName[p] = importPath
 			i.importsByPath[importPath] = importDef{
-				packageName: finalPackageName,
-				isAlias:     i.isAlias(packageName, assumedPackageName, finalPackageName),
+				packageName: p,
+				isAlias:     p != packageName,
 			}
-			return finalPackageName + "."
+			return p + "."
 		}
-		finalPackageName = fmt.Sprintf("%s%d", pkgBase, suffix)
+		p = fmt.Sprintf("%s%d", pkgBase, suffix)
 		suffix++
 	}
 }
@@ -366,31 +351,6 @@ func (i *Imports) ImportSpecs() []ImportSpec {
 		return specs[i].ImportPath < specs[j].ImportPath
 	})
 	return specs
-}
-
-// SetConventions configures the function to use for inferring the package name
-// from an import path. This is used to determine when aliases are necessary
-// when printing ImportSpecs for a file.
-func (i *Imports) SetConventions(namer ImportConventions) {
-	i.customConventions = namer
-}
-
-// conventions returns the naming conventions to use when inferring a default
-// package name from an import path.
-func (i *Imports) conventions() ImportConventions {
-	if i.customConventions != nil {
-		return i.customConventions
-	}
-	return DefaultImportConventions
-}
-
-// conventions returns the naming conventions to use when inferring a default
-// package name from an import path.
-func (i *Imports) isAlias(packageNameInPackageObject, assumedPackageName, finalPackageName string) bool {
-	if packageNameInPackageObject == "" {
-		return true
-	}
-	return finalPackageName != assumedPackageName
 }
 
 // ImportSpec describes an import statement in Go source. The spec's
