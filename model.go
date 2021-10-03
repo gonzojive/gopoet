@@ -12,7 +12,6 @@ import (
 
 	"go/format"
 	"go/types"
-	"path"
 	"strconv"
 	"text/template"
 )
@@ -26,22 +25,30 @@ type Package struct {
 	ImportPath, Name string
 }
 
-// NewPackage is a simple factory method for a package whose name is the same as
-// the base name (e.g. last element) of its import path.
+// NewPackage is a simple factory method for a package with a package name that
+// can be inferred from its import path. Typically this is the base name (e.g.
+// last element) of its import path, though there are some exceptions for
+// versioned modules.
+//
+// This function simply returns
+//
+//		Package{
+//			ImportPath: importPath,
+//			Name: DefaultImportConventions.AssumedPackageName(importPath),
+//		}
 //
 // If the package name varies from its import path, use a struct initializer
 // instead:
 //
-//    Package{Name: "foo", ImportPath: "some.domain.com/foo/v1"}
+//    Package{Name: "dinosaurpb", ImportPath: "some.domain.com/dinosaur_go_proto"}
 //
-// If you do not know the package name, only the import path, then use
-// a struct initializer and leave the Name field empty. An empty Name field will
-// cause an alias to be used when the package is registered with an *Imports,
-// to ensure that the resulting code will compile and uses a correct package
-// prefix.
+// If you do not know the package name, only the import path, then use a struct
+// initializer and leave the Name field empty. An empty Name field will cause
+// the Imports object to decide on the package name to use when printing the
+// symbol.
 func NewPackage(importPath string) Package {
 	return Package{
-		Name:       path.Base(importPath),
+		Name:       DefaultImportConventions.AssumedPackageName(importPath),
 		ImportPath: importPath,
 	}
 }

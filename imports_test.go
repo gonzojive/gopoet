@@ -1,9 +1,9 @@
 package gopoet
 
 import (
-	"reflect"
 	"testing"
 
+	"github.com/dgraph-io/badger/v3"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -19,6 +19,7 @@ func TestImportPackages(t *testing.T) {
 }
 
 func doRegisterImport(t *testing.T, fn func(imp *Imports, pkgPath, name string) string) {
+	t.Helper()
 	checkPrefix := func(actual, expected string) {
 		if actual != expected {
 			t.Errorf("wrong import prefix: expected %q, got %q", expected, actual)
@@ -104,8 +105,8 @@ func doRegisterImport(t *testing.T, fn func(imp *Imports, pkgPath, name string) 
 		// alias since actual package name was unknown:
 		{ImportPath: "foo.bar/fuzzywuzzy", PackageAlias: "fuzzywuzzy"},
 	}
-	if !reflect.DeepEqual(specs, expected) {
-		t.Errorf("unexpected import specs\nExpected:\n%v\nActual:\n%v", expected, specs)
+	if diff := cmp.Diff(expected, specs); diff != "" {
+		t.Errorf("unexpected import specs (-expected, +actual):\n  %s", diff)
 	}
 }
 
@@ -116,7 +117,8 @@ func TestImportSpecsForFile(t *testing.T) {
 		return f
 	}
 	type ensureImportedExample struct {
-		input, want Symbol
+		input Symbol
+		want  string
 	}
 	for _, tt := range []struct {
 		name    string
@@ -146,12 +148,21 @@ func TestImportSpecsForFile(t *testing.T) {
 			symbols: []ensureImportedExample{
 				{
 					input: NewSymbol("y/foo", "Bar"),
-					want:  Symbol{Package: Package{ImportPath: "x/foo", Name: "fooalias"}, Name: "Bar"},
+					want:  "foo1.Bar",
 				},
 			},
 		},
 		{
-			name: "RegisterImportForPackage respects aliases",
+			name: "RegisterImportForPackage respects aliases old API",
+			f: buildFile("a.go", "x/y/z", "z", func(f *GoFile) {
+				f.RegisterImportForPackage(Package{Name: "fooalias", ImportPath: "x/foo"})
+			}),
+			want: []ImportSpec{
+				{PackageAlias: "fooalias", ImportPath: "x/foo"},
+			},
+		},
+		{
+			name: "RegisterImportForPackage respects aliases new method",
 			f: buildFile("a.go", "x/y/z", "z", func(f *GoFile) {
 				f.RegisterImportForPackage(Package{Name: "fooalias", ImportPath: "x/foo"})
 			}),
@@ -170,7 +181,7 @@ func TestImportSpecsForFile(t *testing.T) {
 			symbols: []ensureImportedExample{
 				{
 					input: NewSymbol("x/foo", "Bar"),
-					want:  Symbol{Package: Package{ImportPath: "x/foo", Name: "fooalias"}, Name: "Bar"},
+					want:  "fooalias.Bar",
 				},
 			},
 		},
@@ -181,13 +192,14 @@ func TestImportSpecsForFile(t *testing.T) {
 				t.Errorf("unexpected diff in ImportSpecs() of file (-want, +got):\n%s", diff)
 			}
 			for _, ttt := range tt.symbols {
-				got := tt.f.EnsureImported(ttt.want)
-				if diff := cmp.Diff(ttt.want, got); diff != "" {
-					t.Errorf("unexpected diff in EnsureImported(%s) (-want, +got):\n%s", ttt.input, diff)
+				got := tt.f.EnsureImported(ttt.input)
+				if got.String() != ttt.want {
+					t.Errorf("EnsureImported(%s) got %q, wanted %q %d", ttt.input, got, ttt.want, badger.BlockCache)
 				}
 			}
 		})
 	}
+
 }
 
 func expectToPanic(t *testing.T, fn func()) {
