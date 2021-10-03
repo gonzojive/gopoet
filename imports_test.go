@@ -116,13 +116,16 @@ func TestImportSpecsForFile(t *testing.T) {
 		return f
 	}
 	type ensureImportedExample struct {
-		input, want Symbol
+		input Symbol
+		// want is the symbol as it should appear in Go source.
+		want string
 	}
 	for _, tt := range []struct {
 		name    string
 		f       *GoFile
 		want    []ImportSpec
 		symbols []ensureImportedExample
+		skip    bool
 	}{
 		{
 			name: "simple",
@@ -146,44 +149,33 @@ func TestImportSpecsForFile(t *testing.T) {
 			symbols: []ensureImportedExample{
 				{
 					input: NewSymbol("y/foo", "Bar"),
-					want:  Symbol{Package: Package{ImportPath: "x/foo", Name: "fooalias"}, Name: "Bar"},
+					// Note: This is not necessarily required to be "foo1"
+					// exactly by the API.
+					want: "foo1.Bar",
 				},
 			},
 		},
 		{
 			name: "RegisterImportForPackage respects aliases",
 			f: buildFile("a.go", "x/y/z", "z", func(f *GoFile) {
-				f.RegisterImportForPackage(Package{Name: "fooalias", ImportPath: "x/foo"})
+				f.RegisterAliasedImport("x/foo", "fooalias")
 			}),
 			want: []ImportSpec{
 				{PackageAlias: "fooalias", ImportPath: "x/foo"},
-			},
-		},
-		{
-			name: "RegisterImportForPackage consistent with EnsureImported",
-			f: buildFile("a.go", "x/y/z", "z", func(f *GoFile) {
-				f.RegisterImportForPackage(Package{Name: "fooalias", ImportPath: "x/foo"})
-			}),
-			want: []ImportSpec{
-				{PackageAlias: "fooalias", ImportPath: "x/foo"},
-			},
-			symbols: []ensureImportedExample{
-				{
-					input: NewSymbol("x/foo", "Bar"),
-					want:  Symbol{Package: Package{ImportPath: "x/foo", Name: "fooalias"}, Name: "Bar"},
-				},
 			},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.skip {
+				t.Skip()
+			}
 			got := tt.f.ImportSpecs()
 			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("unexpected diff in ImportSpecs() of file (-want, +got):\n%s", diff)
 			}
 			for _, ttt := range tt.symbols {
-				got := tt.f.EnsureImported(ttt.want)
-				if diff := cmp.Diff(ttt.want, got); diff != "" {
-					t.Errorf("unexpected diff in EnsureImported(%s) (-want, +got):\n%s", ttt.input, diff)
+				if got := tt.f.EnsureImported(ttt.input).String(); got != ttt.want {
+					t.Errorf("unexpected diff in EnsureImported(%+v): got %q, want %q", ttt.input, got, ttt.want)
 				}
 			}
 		})
