@@ -12,7 +12,6 @@ import (
 
 	"go/format"
 	"go/types"
-	"path"
 	"strconv"
 	"text/template"
 )
@@ -41,7 +40,7 @@ type Package struct {
 // prefix.
 func NewPackage(importPath string) Package {
 	return Package{
-		Name:       path.Base(importPath),
+		Name:       assumedPackageNameForImport(importPath),
 		ImportPath: importPath,
 	}
 }
